@@ -22,17 +22,8 @@
     body { font-family: 'Noto Sans TC', sans-serif; -webkit-tap-highlight-color: transparent; }
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-    
-    /* 修正下拉選單外觀：自定義箭頭圖標避免跑位 */
-    select { 
-      -webkit-appearance: none; 
-      -moz-appearance: none; 
-      appearance: none; 
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 12px center;
-      background-size: 16px;
-    }
+    /* 下拉選單外觀修正 */
+    select { -webkit-appearance: none; -moz-appearance: none; appearance: none; }
   </style>
 </head>
 <body class="bg-slate-50">
@@ -145,25 +136,40 @@
 
       const showToast = (msg) => { setToast({ show: true, message: msg }); setTimeout(() => setToast({ show: false, message: '' }), 3000); };
 
+      // --- 歷史統整計算 ---
+      const historySummary = useMemo(() => {
+        if (!historyDetailItem) return null;
+        const records = JSON.parse(historyDetailItem.records);
+        const totals = records.reduce((acc, r) => {
+          acc.deposit += (r.deposit || 0);
+          acc.bet += (r.bet || 0);
+          acc.prize += (r.prize || 0);
+          acc.rebate += calculateRebateValue(r);
+          acc.adjustment += (r.adjustment || 0);
+          return acc;
+        }, { deposit: 0, bet: 0, prize: 0, rebate: 0, adjustment: 0 });
+        return { firstPrev: records[0]?.prevBalance || 0, ...totals };
+      }, [historyDetailItem]);
+
       // --- 操作功能 ---
       const addNewRecord = async () => {
         if (!selectedCustomerId) return;
         const nextPrev = chainedRecords.length > 0 ? calculateItemTotal(chainedRecords[chainedRecords.length - 1]) : 0;
         const cust = customers.find(c => c.id === selectedCustomerId);
         
-        // 修正本地日期時間 (24小時制)
+        // 合併格式化本地日期與時間 (YYYY-MM-DDTHH:mm) 供 datetime-local 使用
         const now = new Date();
-        const y = now.getFullYear();
-        const m = String(now.getMonth() + 1).padStart(2, '0');
-        const d = String(now.getDate()).padStart(2, '0');
-        const currentDateStr = `${y}-${m}-${d}`;
-        const currentTimeStr = now.toLocaleTimeString('zh-TW', { hour12: false, hour: '2-digit', minute: '2-digit' });
+        const yyyy = now.getFullYear();
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        const hh = String(now.getHours()).padStart(2, '0');
+        const min = String(now.getMinutes()).padStart(2, '0');
+        const currentDateTimeStr = `${yyyy}-${mm}-${dd}T${hh}:${min}`;
 
         await db.collection(`artifacts/${appId}/users/${user.uid}/currentRecords`).add({
           customerId: selectedCustomerId, 
           timestamp: Date.now(), 
-          date: currentDateStr, 
-          time: currentTimeStr, 
+          datetime: currentDateTimeStr, 
           prevBalance: nextPrev, 
           deposit: 0, 
           bet: 0, 
@@ -193,7 +199,8 @@
         text += `顧客：${customer.name}\n日期：${new Date().toLocaleDateString()}\n`;
         text += `--------------------------\n`;
         chainedRecords.forEach((r, i) => {
-          text += `#${i+1} 帳務資訊 (${r.date} ${r.time})\n`;
+          const displayTime = r.datetime ? r.datetime.replace('T', ' ') : '未知時間';
+          text += `#${i+1} 帳務資訊 (${displayTime})\n`;
           text += `  原餘額：$${Math.round(r.prevBalance).toLocaleString()}\n`;
           text += `  今日轉存：+ $${r.deposit.toLocaleString()}\n`;
           text += `  投注金額：- $${r.bet.toLocaleString()}\n`;
@@ -207,21 +214,7 @@
         return text;
       };
 
-      const historySummary = useMemo(() => {
-        if (!historyDetailItem) return null;
-        const records = JSON.parse(historyDetailItem.records);
-        const totals = records.reduce((acc, r) => {
-          acc.deposit += (r.deposit || 0);
-          acc.bet += (r.bet || 0);
-          acc.prize += (r.prize || 0);
-          acc.rebate += calculateRebateValue(r);
-          acc.adjustment += (r.adjustment || 0);
-          return acc;
-        }, { deposit: 0, bet: 0, prize: 0, rebate: 0, adjustment: 0 });
-        return { firstPrev: records[0]?.prevBalance || 0, ...totals };
-      }, [historyDetailItem]);
-
-      if (!user) return <div className="h-screen flex items-center justify-center bg-slate-50 text-slate-400 font-black tracking-widest">系統載入中...</div>;
+      if (!user) return <div className="h-screen flex items-center justify-center bg-slate-50 text-slate-400 font-black tracking-widest">系統連線中...</div>;
 
       return (
         <div className="min-h-screen bg-slate-50 pb-48 font-sans text-slate-900 antialiased">
@@ -276,22 +269,50 @@
                       <span className="font-black text-slate-900 text-lg">#{i + 1} 帳務資訊</span>
                       <div className="flex flex-col items-end gap-2">
                         <div className="flex items-center gap-1">
-                          <input type="date" value={r.date} onChange={(e) => db.doc(`artifacts/${appId}/users/${user.uid}/currentRecords/${r.id}`).update({ date: e.target.value })} className="bg-slate-100 border-none rounded-lg p-1 text-[10px] font-bold text-slate-600 focus:ring-0 w-24" />
-                          <input type="time" value={r.time} onChange={(e) => db.doc(`artifacts/${appId}/users/${user.uid}/currentRecords/${r.id}`).update({ time: e.target.value })} className="bg-slate-100 border-none rounded-lg p-1 text-[10px] font-bold text-slate-600 focus:ring-0 w-16" />
+                          <input 
+                            type="datetime-local" 
+                            value={r.datetime} 
+                            onChange={(e) => db.doc(`artifacts/${appId}/users/${user.uid}/currentRecords/${r.id}`).update({ datetime: e.target.value })} 
+                            className="bg-slate-100 border-none rounded-lg p-1.5 text-[10px] font-bold text-slate-600 focus:ring-0 w-44" 
+                          />
                         </div>
                         <button onClick={() => setModalConfig({ show: true, title: '刪除項目', message: '確定刪除此帳務項目嗎？', onConfirm: () => db.doc(`artifacts/${appId}/users/${user.uid}/currentRecords/${r.id}`).delete() })} className="text-slate-200 hover:text-red-400 p-1 flex items-center justify-center"><Icon name="trash-2" size={18} /></button>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="col-span-2 space-y-1.5"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex justify-between"><span>原餘額</span>{i > 0 && <span className="text-blue-500 font-bold tracking-normal">自動連動項目 #{i}</span>}</label><input type="number" value={r.prevBalance} readOnly={i > 0} onFocus={(e) => e.target.select()} onChange={(e) => db.doc(`artifacts/${appId}/users/${user.uid}/currentRecords/${r.id}`).update({ prevBalance: parseFloat(e.target.value)||0 })} className={`w-full text-xl font-black p-4 rounded-2xl border-none ring-1 ring-slate-100 ${i > 0 ? 'bg-slate-50 text-slate-400' : 'bg-white text-slate-900 shadow-inner'}`} /></div>
-                      <div className="space-y-1.5"><label className="text-[10px] font-black text-blue-600 uppercase tracking-widest">今日轉存 (+)</label><input type="number" defaultValue={r.deposit} onFocus={(e) => e.target.select()} onBlur={(e) => db.doc(`artifacts/${appId}/users/${user.uid}/currentRecords/${r.id}`).update({ deposit: parseFloat(e.target.value)||0 })} className="w-full text-xl font-black p-4 rounded-2xl border-none ring-1 ring-blue-50 bg-blue-50/30 text-blue-700 shadow-sm" /></div>
-                      <div className="space-y-1.5"><label className="text-[10px] font-black text-red-500 uppercase tracking-widest">投注金額 (-)</label><input type="number" defaultValue={r.bet} onFocus={(e) => e.target.select()} onBlur={(e) => db.doc(`artifacts/${appId}/users/${user.uid}/currentRecords/${r.id}`).update({ bet: parseFloat(e.target.value)||0 })} className="w-full text-xl font-black p-4 rounded-2xl border-none ring-1 ring-red-50 bg-red-50/30 text-red-600 shadow-sm" /></div>
-                      <div className="space-y-1.5"><label className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">兌獎金額 (+)</label><input type="number" defaultValue={r.prize} onFocus={(e) => e.target.select()} onBlur={(e) => db.doc(`artifacts/${appId}/users/${user.uid}/currentRecords/${r.id}`).update({ prize: parseFloat(e.target.value)||0 })} className="w-full text-xl font-black p-4 rounded-2xl border-none ring-1 ring-emerald-50 bg-emerald-50/30 text-emerald-700 shadow-sm" /></div>
-                      <div className="space-y-1.5"><label className="text-[10px] font-black text-purple-600 uppercase tracking-widest">回饋點數 %</label><input type="number" defaultValue={r.rebatePercent} onFocus={(e) => e.target.select()} onBlur={(e) => db.doc(`artifacts/${appId}/users/${user.uid}/currentRecords/${r.id}`).update({ rebatePercent: parseFloat(e.target.value)||0 })} className="w-full text-xl font-black p-4 rounded-2xl border-none ring-1 ring-purple-50 bg-purple-50/30 text-purple-700 shadow-sm" /></div>
-                      <div className="space-y-1.5 col-span-2"><label className="text-[10px] font-black text-purple-400 uppercase tracking-widest">回饋點數 $ (自動)</label><input type="number" readOnly value={Math.round(calculateRebateValue(r))} className="w-full text-xl font-black p-4 rounded-2xl border-none ring-1 ring-slate-100 bg-slate-50 text-purple-500" /></div>
-                      <div className="space-y-1.5 col-span-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">調整 (±)</label><input type="number" defaultValue={r.adjustment} onFocus={(e) => e.target.select()} onBlur={(e) => db.doc(`artifacts/${appId}/users/${user.uid}/currentRecords/${r.id}`).update({ adjustment: parseFloat(e.target.value)||0 })} className="w-full text-xl font-black p-4 rounded-2xl border-none ring-1 ring-slate-100 bg-slate-50 text-slate-700 outline-none shadow-sm" /></div>
+                      <div className="col-span-2 space-y-1.5">
+                        <label className="text-[16px] font-black text-slate-400 uppercase tracking-widest flex justify-between">
+                          <span>原餘額</span>
+                          {i > 0 && <span className="text-blue-500 font-bold tracking-normal text-[10px]">自動連動項目 #{i}</span>}
+                        </label>
+                        <input type="number" value={r.prevBalance} readOnly={i > 0} onFocus={(e) => e.target.select()} onChange={(e) => db.doc(`artifacts/${appId}/users/${user.uid}/currentRecords/${r.id}`).update({ prevBalance: parseFloat(e.target.value)||0 })} className={`w-full text-xl font-black p-4 rounded-2xl border-none ring-1 ring-slate-100 ${i > 0 ? 'bg-slate-50 text-slate-400' : 'bg-white text-slate-900 shadow-inner'}`} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[16px] font-black text-blue-600 uppercase tracking-widest">今日轉存 (+)</label>
+                        <input type="number" defaultValue={r.deposit} onFocus={(e) => e.target.select()} onBlur={(e) => db.doc(`artifacts/${appId}/users/${user.uid}/currentRecords/${r.id}`).update({ deposit: parseFloat(e.target.value)||0 })} className="w-full text-xl font-black p-4 rounded-2xl border-none ring-1 ring-blue-50 bg-blue-50/30 text-blue-700 shadow-sm" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[16px] font-black text-red-500 uppercase tracking-widest">投注金額 (-)</label>
+                        <input type="number" defaultValue={r.bet} onFocus={(e) => e.target.select()} onBlur={(e) => db.doc(`artifacts/${appId}/users/${user.uid}/currentRecords/${r.id}`).update({ bet: parseFloat(e.target.value)||0 })} className="w-full text-xl font-black p-4 rounded-2xl border-none ring-1 ring-red-50 bg-red-50/30 text-red-600 shadow-sm" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[16px] font-black text-emerald-600 uppercase tracking-widest">兌獎金額 (+)</label>
+                        <input type="number" defaultValue={r.prize} onFocus={(e) => e.target.select()} onBlur={(e) => db.doc(`artifacts/${appId}/users/${user.uid}/currentRecords/${r.id}`).update({ prize: parseFloat(e.target.value)||0 })} className="w-full text-xl font-black p-4 rounded-2xl border-none ring-1 ring-emerald-50 bg-emerald-50/30 text-emerald-700 shadow-sm" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[16px] font-black text-purple-600 uppercase tracking-widest">回饋點數 %</label>
+                        <input type="number" defaultValue={r.rebatePercent} onFocus={(e) => e.target.select()} onBlur={(e) => db.doc(`artifacts/${appId}/users/${user.uid}/currentRecords/${r.id}`).update({ rebatePercent: parseFloat(e.target.value)||0 })} className="w-full text-xl font-black p-4 rounded-2xl border-none ring-1 ring-purple-50 bg-purple-50/30 text-purple-700 shadow-sm" />
+                      </div>
+                      <div className="space-y-1.5 col-span-2">
+                        <label className="text-[16px] font-black text-purple-400 uppercase tracking-widest">回饋點數 $ (自動)</label>
+                        <input type="number" readOnly value={Math.round(calculateRebateValue(r))} className="w-full text-xl font-black p-4 rounded-2xl border-none ring-1 ring-slate-100 bg-slate-50 text-purple-500" />
+                      </div>
+                      <div className="space-y-1.5 col-span-2">
+                        <label className="text-[16px] font-black text-slate-400 uppercase tracking-widest">調整 (±)</label>
+                        <input type="number" defaultValue={r.adjustment} onFocus={(e) => e.target.select()} onBlur={(e) => db.doc(`artifacts/${appId}/users/${user.uid}/currentRecords/${r.id}`).update({ adjustment: parseFloat(e.target.value)||0 })} className="w-full text-xl font-black p-4 rounded-2xl border-none ring-1 ring-slate-100 bg-slate-50 text-slate-700 outline-none shadow-sm" />
+                      </div>
                     </div>
-                    <div className="pt-5 border-t border-slate-50 flex justify-between items-center"><div className="flex flex-col"><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">本項合計小計</span><span className="text-3xl font-black tracking-tighter text-slate-900">$ {Math.round(calculateItemTotal(r)).toLocaleString()}</span></div><div className="p-3 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center shadow-inner"><Icon name="calculator" size={24} /></div></div>
+                    <div className="pt-5 border-t border-slate-50 flex justify-between items-center"><div className="flex flex-col"><span className="text-[16px] font-black text-slate-400 uppercase tracking-widest">本項合計小計</span><span className="text-3xl font-black tracking-tighter text-slate-900">$ {Math.round(calculateItemTotal(r)).toLocaleString()}</span></div><div className="p-3 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center shadow-inner"><Icon name="calculator" size={24} /></div></div>
                   </div>
                 ))}
                 <button onClick={addNewRecord} className="w-full border-2 border-dashed border-slate-300 py-12 rounded-[2.5rem] text-slate-400 font-black flex flex-col items-center justify-center gap-3 active:scale-95 transition-transform shadow-sm"><Icon name="plus" size={40} /><span className="text-sm uppercase tracking-widest tracking-tight">新增帳務項目卡片</span></button>
@@ -336,7 +357,7 @@
                 <div className="space-y-6 mb-10">
                   {chainedRecords.map((r, i) => (
                     <div key={r.id} className="bg-slate-50 p-6 rounded-3xl space-y-3 border border-slate-100 shadow-sm">
-                      <div className="flex justify-between border-b pb-2 font-black text-slate-700"><span>#{i+1} 帳務資訊</span><span className="text-[10px] text-slate-400">{r.date} {r.time}</span></div>
+                      <div className="flex justify-between border-b pb-2 font-black text-slate-700"><span>#{i+1} 帳務資訊</span><span className="text-[10px] text-slate-400">{r.datetime ? r.datetime.replace('T', ' ') : '未知時間'}</span></div>
                       <div className="grid grid-cols-2 gap-y-2 text-xs font-bold text-slate-600">
                         <p>原餘額：</p><p className="text-right tracking-tight">${Math.round(r.prevBalance).toLocaleString()}</p>
                         <p>今日轉存：</p><p className="text-right text-blue-600 tracking-tight">+ ${r.deposit.toLocaleString()}</p>
@@ -355,7 +376,7 @@
                 <div className="bg-blue-600 p-8 rounded-[2.5rem] flex justify-between items-center mb-8 text-white shadow-xl shadow-blue-100"><span className="text-xl font-black tracking-tight uppercase">目前總結餘</span><span className="text-4xl font-black tracking-tighter leading-none">$ {Math.round(finalTotal).toLocaleString()}</span></div>
                 <div className="grid grid-cols-1 gap-3">
                   <button onClick={() => { const text = buildShareText(); const el = document.createElement('textarea'); el.value = text; document.body.appendChild(el); el.select(); document.execCommand('copy'); document.body.removeChild(el); showToast('已複製文字明細'); }} className="py-5 bg-slate-100 text-slate-800 font-black rounded-3xl flex items-center justify-center gap-3 active:scale-95 shadow-sm transition-all"><Icon name="copy" size={20}/> 複製文字明細</button>
-                  <button onClick={() => setIsSettleModalOpen(true)} className="py-5 bg-green-600 text-white font-black rounded-3xl flex items-center justify-center gap-3 active:scale-95 shadow-xl shadow-green-50 transition-all"><Icon name="check-circle-2" size={20}/> 確認並結帳</button>
+                  <button onClick={() => setIsSettleModalOpen(true)} className="py-5 bg-green-600 text-white font-black rounded-3xl flex items-center justify-center gap-3 active:scale-95 shadow-xl shadow-green-50 transition-all"><CheckCircle2 size={20}/> 確認並結帳</button>
                 </div>
               </div>
             </div>
@@ -368,7 +389,7 @@
 
           {/* History Details Modal */}
           {historyDetailItem && historySummary && (
-            <div className="fixed inset-0 z-[250] flex items-center justify-center p-6"><div className="absolute inset-0 bg-slate-900/70 backdrop-blur-md" onClick={() => setHistoryDetailItem(null)}></div><div className="relative w-full max-w-md bg-white rounded-[3rem] p-8 shadow-2xl max-h-[90vh] overflow-y-auto animate-in zoom-in no-scrollbar"><div className="flex justify-between items-center mb-6"><h3 className="text-xl font-black text-slate-800 tracking-tighter">歷史結算統整</h3><button onClick={() => setHistoryDetailItem(null)} className="p-2 bg-slate-100 rounded-full flex items-center justify-center"><Icon name="x" /></button></div><div className="bg-slate-50 p-5 rounded-3xl mb-8 border border-slate-100 space-y-2 text-xs font-bold text-slate-500">
+            <div className="fixed inset-0 z-[250] flex items-center justify-center p-6"><div className="absolute inset-0 bg-slate-900/70 backdrop-blur-md" onClick={() => setHistoryDetailItem(null)}></div><div className="relative w-full max-md bg-white rounded-[3rem] p-8 shadow-2xl max-h-[90vh] overflow-y-auto animate-in zoom-in no-scrollbar"><div className="flex justify-between items-center mb-6"><h3 className="text-xl font-black text-slate-800 tracking-tighter">歷史結算統整</h3><button onClick={() => setHistoryDetailItem(null)} className="p-2 bg-slate-100 rounded-full flex items-center justify-center"><Icon name="x" /></button></div><div className="bg-slate-50 p-5 rounded-3xl mb-8 border border-slate-100 space-y-2 text-xs font-bold text-slate-500">
               <div className="flex justify-between"><span>對帳日期</span><span className="text-slate-800">{historyDetailItem.date}</span></div>
               <div className="flex justify-between"><span>結帳人員</span><span className="text-blue-600 font-black">{historyDetailItem.settledBy || '系統自動'}</span></div>
               <div className="flex justify-between"><span>結帳時間</span><span className="text-slate-800">{new Date(historyDetailItem.settledAt).toLocaleTimeString()}</span></div>
