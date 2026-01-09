@@ -50,7 +50,7 @@
     const db = firebase.firestore();
     const appId = "shang-hao-zhong-v5";
 
-    // 統一圖標組件，避免 ReferenceError
+    // 統一圖標組件
     const Icon = ({ name, size = 20, className = "" }) => {
       useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
       return <i data-lucide={name} style={{ width: size, height: size }} className={`flex items-center justify-center ${className}`}></i>;
@@ -68,15 +68,18 @@
       
       const [isSettleModalOpen, setIsSettleModalOpen] = useState(false);
       const [cashierName, setCashierName] = useState('');
+      const [isHandoverNotSettled, setIsHandoverNotSettled] = useState(false);
+      const [isAllSettled, setIsAllSettled] = useState(false);
+
       const [historyDetailItem, setHistoryDetailItem] = useState(null);
       
       const [modalConfig, setModalConfig] = useState({ show: false, title: '', message: '', onConfirm: null });
       const [toast, setToast] = useState({ show: false, message: '' });
 
-      // 雲端路徑定義：改為公共共享路徑以實現不限設備同步
+      // 雲端路徑定義：改為公共共享路徑
       const publicPath = `artifacts/${appId}/public/data`;
 
-      // 1. 匿名驗證 (Rule 3: Auth Before Queries)
+      // 1. 匿名驗證
       useEffect(() => {
         const unsubAuth = auth.onAuthStateChanged(u => {
           if (u) { setUser(u); } else { auth.signInAnonymously(); }
@@ -84,11 +87,10 @@
         return () => unsubAuth();
       }, []);
 
-      // 2. 即時資料同步 (Rule 1 & 2)
+      // 2. 即時資料同步
       useEffect(() => {
         if (!user) return;
         
-        // 監聽公共區域的資料
         const unsubCust = db.collection(`${publicPath}/customers`).onSnapshot(snap => {
           const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
           setCustomers(list);
@@ -186,10 +188,13 @@
         try {
           await db.collection(`${publicPath}/historyRecords`).add({
             customerId: selectedCustomerId, settledAt: Date.now(), settledBy: cashierName,
+            isHandoverNotSettled: isHandoverNotSettled,
+            isAllSettled: isAllSettled,
             date: new Date().toLocaleDateString(), records: JSON.stringify(chainedRecords), total: finalTotal
           });
           for (const r of currentRecords) { await db.doc(`${publicPath}/currentRecords/${r.id}`).delete(); }
-          setIsSettleModalOpen(false); setIsSheetOpen(false); setCashierName('');
+          setIsSettleModalOpen(false); setIsSheetOpen(false); 
+          setCashierName(''); setIsHandoverNotSettled(false); setIsAllSettled(false);
           showToast('結帳完成，已儲存至雲端歷史紀錄！');
         } catch (e) { showToast('結帳失敗'); }
       };
@@ -381,23 +386,59 @@
                 <div className="bg-blue-600 p-8 rounded-[2.5rem] flex justify-between items-center mb-8 text-white shadow-xl shadow-blue-100"><span className="text-xl font-black tracking-tight uppercase">目前總結餘</span><span className="text-4xl font-black tracking-tighter leading-none">$ {Math.round(finalTotal).toLocaleString()}</span></div>
                 <div className="grid grid-cols-1 gap-3">
                   <button onClick={() => { const text = buildShareText(); const el = document.createElement('textarea'); el.value = text; document.body.appendChild(el); el.select(); document.execCommand('copy'); document.body.removeChild(el); showToast('已複製文字明細'); }} className="py-5 bg-slate-100 text-slate-800 font-black rounded-3xl flex items-center justify-center gap-3 active:scale-95 shadow-sm transition-all"><Icon name="copy" size={20}/> 複製文字明細</button>
-                  <button onClick={() => setIsSettleModalOpen(true)} className="py-5 bg-green-600 text-white font-black rounded-3xl flex items-center justify-center gap-3 active:scale-95 shadow-xl shadow-green-50 transition-all"><Icon name="check-circle-2" size={20}/> 確認並結帳</button>
+                  <button onClick={() => setIsSettleModalOpen(true)} className="py-5 bg-green-600 text-white font-black rounded-3xl flex items-center justify-center gap-3 active:scale-95 shadow-xl shadow-green-50 transition-all"><Icon name="check-circle-2" size={20} /> 前往結帳</button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* 結帳人員必填 Modal */}
+          {/* Settle Modal (新增勾選欄位) */}
           {isSettleModalOpen && (
-            <div className="fixed inset-0 z-[300] flex items-center justify-center p-6"><div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsSettleModalOpen(false)}></div><div className="relative w-full max-w-sm bg-white rounded-[2.5rem] p-8 shadow-2xl animate-in zoom-in"><div className="flex items-center gap-3 text-blue-600 mb-4"><Icon name="user-check" size={28} /><h3 className="text-xl font-black">結帳歸檔確認</h3></div><p className="text-slate-500 font-bold mb-6 text-sm">請輸入結帳人員姓名 (必填)：</p><input type="text" value={cashierName} onChange={(e) => setCashierName(e.target.value)} placeholder="例如：阿中" className="w-full bg-slate-50 border-none p-4 rounded-2xl text-lg font-bold ring-1 ring-slate-200 focus:ring-2 focus:ring-blue-500 mb-8 outline-none shadow-inner" autoFocus /><div className="flex gap-3"><button onClick={() => setIsSettleModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-400 font-black rounded-2xl active:scale-95">取消</button><button onClick={confirmSettle} className="flex-1 py-4 bg-blue-600 text-white font-black rounded-2xl shadow-lg active:scale-95">確定結帳</button></div></div></div>
+            <div className="fixed inset-0 z-[300] flex items-center justify-center p-6">
+              <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsSettleModalOpen(false)}></div>
+              <div className="relative w-full max-w-sm bg-white rounded-[2.5rem] p-8 shadow-2xl animate-in zoom-in">
+                <div className="flex items-center gap-3 text-blue-600 mb-4"><Icon name="user-check" size={28} /><h3 className="text-xl font-black">結帳歸檔確認</h3></div>
+                
+                <div className="space-y-4 mb-8">
+                  <div>
+                    <p className="text-slate-500 font-bold mb-2 text-sm">請輸入結帳人員姓名 (必填)：</p>
+                    <input type="text" value={cashierName} onChange={(e) => setCashierName(e.target.value)} placeholder="例如：阿中" className="w-full bg-slate-50 border-none p-4 rounded-2xl text-lg font-bold ring-1 ring-slate-200 focus:ring-2 focus:ring-blue-500 outline-none shadow-inner" autoFocus />
+                  </div>
+                  
+                  {/* 新增勾選欄位區區塊 */}
+                  <div className="flex flex-col gap-3 pt-2">
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <input type="checkbox" checked={isHandoverNotSettled} onChange={e => setIsHandoverNotSettled(e.target.checked)} className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                      <span className="text-slate-700 font-bold text-sm group-active:scale-95 transition-transform">交班未結清</span>
+                    </label>
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <input type="checkbox" checked={isAllSettled} onChange={e => setIsAllSettled(e.target.checked)} className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                      <span className="text-slate-700 font-bold text-sm group-active:scale-95 transition-transform">全部已結清</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <button onClick={() => setIsSettleModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-400 font-black rounded-2xl active:scale-95 transition-transform">取消</button>
+                  <button onClick={confirmSettle} className="flex-1 py-4 bg-blue-600 text-white font-black rounded-2xl shadow-lg active:scale-95 transition-transform">確定結帳</button>
+                </div>
+              </div>
+            </div>
           )}
 
-          {/* 歷史紀錄詳情 Modal */}
+          {/* History Details Modal */}
           {historyDetailItem && historySummary && (
             <div className="fixed inset-0 z-[250] flex items-center justify-center p-6"><div className="absolute inset-0 bg-slate-900/70 backdrop-blur-md" onClick={() => setHistoryDetailItem(null)}></div><div className="relative w-full max-md bg-white rounded-[3rem] p-8 shadow-2xl max-h-[90vh] overflow-y-auto animate-in zoom-in no-scrollbar"><div className="flex justify-between items-center mb-6"><h3 className="text-xl font-black text-slate-800 tracking-tighter">歷史結算統整</h3><button onClick={() => setHistoryDetailItem(null)} className="p-2 bg-slate-100 rounded-full flex items-center justify-center"><Icon name="x" /></button></div><div className="bg-slate-50 p-5 rounded-3xl mb-8 border border-slate-100 space-y-2 text-xs font-bold text-slate-500">
               <div className="flex justify-between"><span>對帳日期</span><span className="text-slate-800">{historyDetailItem.date}</span></div>
               <div className="flex justify-between"><span>結帳人員</span><span className="text-blue-600 font-black">{historyDetailItem.settledBy || '系統自動'}</span></div>
               <div className="flex justify-between"><span>結帳時間</span><span className="text-slate-800">{new Date(historyDetailItem.settledAt).toLocaleTimeString()}</span></div>
+              {/* 顯示結清狀態 */}
+              {(historyDetailItem.isHandoverNotSettled || historyDetailItem.isAllSettled) && (
+                <div className="flex gap-2 pt-1">
+                  {historyDetailItem.isHandoverNotSettled && <span className="bg-orange-100 text-orange-600 px-2 py-0.5 rounded text-[10px]">交班未結清</span>}
+                  {historyDetailItem.isAllSettled && <span className="bg-green-100 text-green-600 px-2 py-0.5 rounded text-[10px]">全部已結清</span>}
+                </div>
+              )}
             </div>
             <div className="space-y-4 mb-8 px-2">
               <div className="flex justify-between items-center"><span className="text-sm font-bold text-slate-400 uppercase tracking-widest">首項原餘額</span><span className="font-black text-slate-800 tracking-tight">${Math.round(parseFloat(historySummary.firstPrev) || 0).toLocaleString()}</span></div>
@@ -413,7 +454,7 @@
             <div className="mt-8 flex flex-col gap-3"><button onClick={() => { setModalConfig({ show: true, title: '刪除紀錄', message: '確定刪除這筆歷史紀錄嗎？刪除後無法恢復。', onConfirm: () => { db.doc(`${publicPath}/historyRecords/${historyDetailItem.id}`).delete(); setHistoryDetailItem(null); showToast('紀錄已移除'); } }); }} className="w-full py-4 border-2 border-red-50 text-red-500 font-bold rounded-2xl flex items-center justify-center gap-2 active:bg-red-50 transition-colors"><Icon name="trash-2" size={18} /> 刪除此歷史紀錄</button><button onClick={() => setHistoryDetailItem(null)} className="w-full py-5 bg-slate-800 text-white font-black rounded-3xl active:scale-95 transition-all">關閉明細</button></div></div></div>
           )}
 
-          {/* 確認 Modal */}
+          {/* Alert Modal */}
           {modalConfig.show && (
             <div className="fixed inset-0 z-[300] flex items-center justify-center p-6"><div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setModalConfig({ ...modalConfig, show: false })}></div><div className="relative w-full max-w-sm bg-white rounded-[2.5rem] p-8 shadow-2xl animate-in zoom-in"><div className="flex items-center gap-3 text-red-500 mb-4"><Icon name="alert-circle" size={28} /><h3 className="text-xl font-black">{modalConfig.title}</h3></div><p className="text-slate-600 font-bold mb-8 leading-relaxed text-sm">{modalConfig.message}</p><div className="flex gap-3"><button onClick={() => setModalConfig({ ...modalConfig, show: false })} className="flex-1 py-4 bg-slate-100 text-slate-400 font-black rounded-2xl active:scale-95 transition-transform">取消</button><button onClick={() => { modalConfig.onConfirm(); setModalConfig({ ...modalConfig, show: false }); }} className="flex-1 py-4 bg-blue-600 text-white font-black rounded-2xl shadow-lg active:scale-95 transition-transform">確定</button></div></div></div>
           )}
