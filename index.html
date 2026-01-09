@@ -32,7 +32,7 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo } = React;
 
-    // --- 您的 Firebase 金鑰配置 (維持不變) ---
+    // --- 您的 Firebase 金鑰配置 ---
     const firebaseConfig = {
       apiKey: "AIzaSyASRHQ9_sQouh09cRwYTOe7ktc2CNdhXyQ",
       authDomain: "h320-6cea5.firebaseapp.com",
@@ -76,7 +76,7 @@
       const [modalConfig, setModalConfig] = useState({ show: false, title: '', message: '', onConfirm: null });
       const [toast, setToast] = useState({ show: false, message: '' });
 
-      // 雲端路徑定義：改為公共共享路徑
+      // 雲端路徑：公共共享路徑
       const publicPath = `artifacts/${appId}/public/data`;
 
       // 1. 匿名驗證
@@ -197,6 +197,14 @@
           setCashierName(''); setIsHandoverNotSettled(false); setIsAllSettled(false);
           showToast('結帳完成，已儲存至雲端歷史紀錄！');
         } catch (e) { showToast('結帳失敗'); }
+      };
+
+      const updateHistoryStatus = async (id, field, value) => {
+        try {
+          await db.doc(`${publicPath}/historyRecords/${id}`).update({ [field]: value });
+          setHistoryDetailItem(prev => ({ ...prev, [field]: value }));
+          showToast('狀態已更新');
+        } catch (e) { showToast('更新失敗'); }
       };
 
       const buildShareText = () => {
@@ -333,6 +341,10 @@
                     <div>
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{h.date}</p>
                       <p className="text-xs text-slate-500 font-bold flex items-center gap-1"><Icon name="file-text" size={12}/> 結帳人員: {h.settledBy || '已歸檔'}</p>
+                      {/* 歷史卡片狀態顯示 */}
+                      <p className="text-[10px] text-slate-400 font-bold mt-1">
+                        狀態：{h.isHandoverNotSettled ? '交班未結清' : (h.isAllSettled ? '全部已結清' : '無')}
+                      </p>
                     </div>
                     <div className="text-right"><p className="text-2xl font-black text-blue-700 tracking-tighter mb-1">$ {Math.round(parseFloat(h.total) || 0).toLocaleString()}</p><p className="text-[10px] font-bold text-slate-300 uppercase">{new Date(h.settledAt).toLocaleTimeString()}</p></div>
                   </div>
@@ -355,7 +367,7 @@
             </div>
           </div>
 
-          {/* 電子帳單 Bottom Sheet */}
+          {/* 明細 Bottom Sheet */}
           {isSheetOpen && (
             <div className="fixed inset-0 z-[100] flex items-end">
               <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm animate-in fade-in" onClick={() => setIsSheetOpen(false)}></div>
@@ -392,7 +404,7 @@
             </div>
           )}
 
-          {/* Settle Modal (新增勾選欄位) */}
+          {/* Settle Modal (結帳視窗) */}
           {isSettleModalOpen && (
             <div className="fixed inset-0 z-[300] flex items-center justify-center p-6">
               <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsSettleModalOpen(false)}></div>
@@ -405,7 +417,6 @@
                     <input type="text" value={cashierName} onChange={(e) => setCashierName(e.target.value)} placeholder="例如：阿中" className="w-full bg-slate-50 border-none p-4 rounded-2xl text-lg font-bold ring-1 ring-slate-200 focus:ring-2 focus:ring-blue-500 outline-none shadow-inner" autoFocus />
                   </div>
                   
-                  {/* 新增勾選欄位區區塊 */}
                   <div className="flex flex-col gap-3 pt-2">
                     <label className="flex items-center gap-3 cursor-pointer group">
                       <input type="checkbox" checked={isHandoverNotSettled} onChange={e => setIsHandoverNotSettled(e.target.checked)} className="w-5 h-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
@@ -426,19 +437,37 @@
             </div>
           )}
 
-          {/* History Details Modal */}
+          {/* 歷史紀錄詳情 Modal (新增修改狀態欄位) */}
           {historyDetailItem && historySummary && (
             <div className="fixed inset-0 z-[250] flex items-center justify-center p-6"><div className="absolute inset-0 bg-slate-900/70 backdrop-blur-md" onClick={() => setHistoryDetailItem(null)}></div><div className="relative w-full max-md bg-white rounded-[3rem] p-8 shadow-2xl max-h-[90vh] overflow-y-auto animate-in zoom-in no-scrollbar"><div className="flex justify-between items-center mb-6"><h3 className="text-xl font-black text-slate-800 tracking-tighter">歷史結算統整</h3><button onClick={() => setHistoryDetailItem(null)} className="p-2 bg-slate-100 rounded-full flex items-center justify-center"><Icon name="x" /></button></div><div className="bg-slate-50 p-5 rounded-3xl mb-8 border border-slate-100 space-y-2 text-xs font-bold text-slate-500">
               <div className="flex justify-between"><span>對帳日期</span><span className="text-slate-800">{historyDetailItem.date}</span></div>
               <div className="flex justify-between"><span>結帳人員</span><span className="text-blue-600 font-black">{historyDetailItem.settledBy || '系統自動'}</span></div>
               <div className="flex justify-between"><span>結帳時間</span><span className="text-slate-800">{new Date(historyDetailItem.settledAt).toLocaleTimeString()}</span></div>
-              {/* 顯示結清狀態 */}
-              {(historyDetailItem.isHandoverNotSettled || historyDetailItem.isAllSettled) && (
-                <div className="flex gap-2 pt-1">
-                  {historyDetailItem.isHandoverNotSettled && <span className="bg-orange-100 text-orange-600 px-2 py-0.5 rounded text-[10px]">交班未結清</span>}
-                  {historyDetailItem.isAllSettled && <span className="bg-green-100 text-green-600 px-2 py-0.5 rounded text-[10px]">全部已結清</span>}
+              
+              {/* 顯示修改此歷史紀錄欄位區區塊 */}
+              <div className="mt-4 pt-4 border-t border-slate-200">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">修改此歷史紀錄（僅限狀態）</p>
+                <div className="flex flex-col gap-3">
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={!!historyDetailItem.isHandoverNotSettled} 
+                      onChange={(e) => updateHistoryStatus(historyDetailItem.id, 'isHandoverNotSettled', e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" 
+                    />
+                    <span className="text-slate-700 font-bold text-xs">交班未結清</span>
+                  </label>
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={!!historyDetailItem.isAllSettled} 
+                      onChange={(e) => updateHistoryStatus(historyDetailItem.id, 'isAllSettled', e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" 
+                    />
+                    <span className="text-slate-700 font-bold text-xs">全部已結清</span>
+                  </label>
                 </div>
-              )}
+              </div>
             </div>
             <div className="space-y-4 mb-8 px-2">
               <div className="flex justify-between items-center"><span className="text-sm font-bold text-slate-400 uppercase tracking-widest">首項原餘額</span><span className="font-black text-slate-800 tracking-tight">${Math.round(parseFloat(historySummary.firstPrev) || 0).toLocaleString()}</span></div>
