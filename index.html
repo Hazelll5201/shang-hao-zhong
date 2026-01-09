@@ -159,9 +159,28 @@
       // --- 操作功能 ---
       const addNewRecord = async () => {
         if (!selectedCustomerId) return;
-        const nextPrev = chainedRecords.length > 0 ? calculateItemTotal(chainedRecords[chainedRecords.length - 1]) : 0;
-        const cust = customers.find(c => c.id === selectedCustomerId);
         
+        let initialPrevBalance = 0;
+        
+        // 判斷是否為第一筆帳務項目卡片
+        if (chainedRecords.length > 0) {
+            // 若非第一筆，繼承上一筆卡片的合計
+            initialPrevBalance = calculateItemTotal(chainedRecords[chainedRecords.length - 1]);
+        } else {
+            // 若為第一筆，檢查歷史紀錄狀態
+            if (historyRecords.length > 0) {
+                const latestHistory = historyRecords[0];
+                if (latestHistory.isHandoverNotSettled) {
+                    // 下班未結清：代入最新歷史結餘
+                    initialPrevBalance = latestHistory.total || 0;
+                } else if (latestHistory.isAllSettled) {
+                    // 全部已結清：設為 0
+                    initialPrevBalance = 0;
+                }
+            }
+        }
+
+        const cust = customers.find(c => c.id === selectedCustomerId);
         const now = new Date();
         const yyyy = now.getFullYear();
         const mm = String(now.getMonth() + 1).padStart(2, '0');
@@ -174,7 +193,7 @@
           customerId: selectedCustomerId, 
           timestamp: Date.now(), 
           datetime: currentDateTimeStr, 
-          prevBalance: nextPrev, 
+          prevBalance: initialPrevBalance, 
           deposit: 0, 
           bet: 0, 
           prize: 0, 
@@ -199,7 +218,6 @@
         } catch (e) { showToast('結帳失敗'); }
       };
 
-      // 改為還原資料邏輯
       const handleModifyHistory = () => {
         if (!historyDetailItem) return;
         setModalConfig({
@@ -209,12 +227,10 @@
           onConfirm: async () => {
             try {
               const recordsToRestore = JSON.parse(historyDetailItem.records);
-              // 將資料還原至當前帳務 (不帶原來的ID，避免衝突)
               for (const r of recordsToRestore) {
                 const { id, ...dataToRestore } = r;
                 await db.collection(`${publicPath}/currentRecords`).add(dataToRestore);
               }
-              // 從歷史紀錄刪除
               await db.doc(`${publicPath}/historyRecords/${historyDetailItem.id}`).delete();
               setHistoryDetailItem(null);
               setView('current');
@@ -414,7 +430,7 @@
                 <div className="bg-blue-600 p-8 rounded-[2.5rem] flex justify-between items-center mb-8 text-white shadow-xl shadow-blue-100"><span className="text-xl font-black tracking-tight uppercase">目前總結餘</span><span className="text-4xl font-black tracking-tighter leading-none">$ {Math.round(finalTotal).toLocaleString()}</span></div>
                 <div className="grid grid-cols-1 gap-3">
                   <button onClick={() => { const text = buildShareText(); const el = document.createElement('textarea'); el.value = text; document.body.appendChild(el); el.select(); document.execCommand('copy'); document.body.removeChild(el); showToast('已複製文字明細'); }} className="py-5 bg-slate-100 text-slate-800 font-black rounded-3xl flex items-center justify-center gap-3 active:scale-95 shadow-sm transition-all"><Icon name="copy" size={20}/> 複製文字明細</button>
-                  <button onClick={() => setIsSettleModalOpen(true)} className="py-5 bg-green-600 text-white font-black rounded-3xl flex items-center justify-center gap-3 active:scale-95 shadow-xl shadow-green-50 transition-all"><Icon name="check-circle-2" size={20} /> 前往結帳</button>
+                  <button onClick={() => setIsSettleModalOpen(true)} className="py-5 bg-green-600 text-white font-black rounded-3xl flex items-center justify-center gap-3 active:scale-95 shadow-xl shadow-green-50 transition-all"><Icon name="check-circle-2" size={20}/> 前往結帳</button>
                 </div>
               </div>
             </div>
@@ -453,7 +469,7 @@
             </div>
           )}
 
-          {/* 歷史紀錄詳情 Modal (修改按鈕與邏輯) */}
+          {/* 歷史紀錄詳情 Modal */}
           {historyDetailItem && historySummary && (
             <div className="fixed inset-0 z-[250] flex items-center justify-center p-6"><div className="absolute inset-0 bg-slate-900/70 backdrop-blur-md" onClick={() => setHistoryDetailItem(null)}></div><div className="relative w-full max-md bg-white rounded-[3rem] p-8 shadow-2xl max-h-[90vh] overflow-y-auto animate-in zoom-in no-scrollbar"><div className="flex justify-between items-center mb-6"><h3 className="text-xl font-black text-slate-800 tracking-tighter">歷史結算統整</h3><button onClick={() => setHistoryDetailItem(null)} className="p-2 bg-slate-100 rounded-full flex items-center justify-center"><Icon name="x" /></button></div><div className="bg-slate-50 p-5 rounded-3xl mb-8 border border-slate-100 space-y-2 text-xs font-bold text-slate-500">
               <div className="flex justify-between"><span>對帳日期</span><span className="text-slate-800">{historyDetailItem.date}</span></div>
@@ -477,7 +493,6 @@
               <div className="h-px bg-slate-100 my-4"></div>
             </div><div className="bg-blue-600 p-8 rounded-[2.5rem] flex justify-between items-center text-white shadow-xl shadow-blue-100"><span className="text-lg font-black uppercase">總計結餘</span><span className="text-3xl font-black tracking-tighter leading-none">${Math.round(historyDetailItem.total || 0).toLocaleString()}</span></div>
             
-            {/* 修改與刪除按鈕區區塊 */}
             <div className="mt-8 flex flex-col gap-3">
               <button 
                 onClick={handleModifyHistory}
